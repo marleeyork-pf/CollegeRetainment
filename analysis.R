@@ -2,11 +2,13 @@
 install.packages("readxl")
 install.packages("knitr")
 install.packages("kableExtra")
+install.packages("performance")
 library(readxl)
 library(dplyr)
 library(emmeans)
 library(knitr)
 library(kableExtra)
+library(performance)
 
 # Helper function for clean table output
 fmt_table <- function(df, caption = NULL) {
@@ -144,6 +146,14 @@ bind_rows(
   fmt_table(caption = "Two-Proportions Test: Retention Rates by EGR 599 Enrollment")
 
 # Logistic Regression: Retention ###############################################
+# Removing the informatics students
+df_reg <- df[df$Primary.Academic.Plan!="Informatics (MS)",]
+df_reg <- droplevels(df_reg)
+
+# Centering credits around 9
+df_reg$Term.1.Enrolled.Units.Centered <- df_reg$Term.1.Enrolled.Units - 9
+df_reg$Term.2.Enrolled.Units.Centered <- df_reg$Term.2.Enrolled.Units - 9
+df_reg$Term.3.Enrolled.Units.Centered <- df_reg$Term.3.Enrolled.Units - 9
 
 # Helper to extract glm coefficients into a tidy table
 glm_table <- function(model, caption = NULL) {
@@ -161,36 +171,46 @@ glm_table <- function(model, caption = NULL) {
 
 # EGR.599-only models
 cat("\n--- Logistic Regression: Retained.2 ~ EGR.599 ---\n")
-model_ret2_EGR599 <- glm(Retained.2 ~ EGR.599, family = "binomial", data = df)
+model_ret2_EGR599 <- glm(Retained.2 ~ EGR.599, family = "binomial", data = df_reg)
 glm_table(model_ret2_EGR599, "Logistic Regression: Term 2 Retention ~ EGR 599 Only")
 
 cat("\n--- Logistic Regression: Retained.3 ~ EGR.599 ---\n")
-model_ret3_EGR599 <- glm(Retained.3 ~ EGR.599, family = "binomial", data = df)
+model_ret3_EGR599 <- glm(Retained.3 ~ EGR.599, family = "binomial", data = df_reg)
 glm_table(model_ret3_EGR599, "Logistic Regression: Term 3 Retention ~ EGR 599 Only")
 
 cat("\n--- Logistic Regression: Retained.4 ~ EGR.599 ---\n")
-model_ret4_EGR599 <- glm(Retained.4 ~ EGR.599, family = "binomial", data = df)
+model_ret4_EGR599 <- glm(Retained.4 ~ EGR.599, family = "binomial", data = df_reg)
 glm_table(model_ret4_EGR599, "Logistic Regression: Term 4 Retention ~ EGR 599 Only")
 
 # Full models with covariates
-model_ret2 <- glm(Retained.2 ~ EGR.599 + Sex + India.Citizen + Primary.Academic.Plan,
-                  data = df, family = "binomial")
-model_ret3 <- glm(Retained.3 ~ EGR.599 + Sex + India.Citizen + Primary.Academic.Plan,
-                  data = df, family = "binomial")
-model_ret4 <- glm(Retained.4 ~ EGR.599 + Sex + India.Citizen + Primary.Academic.Plan,
-                  data = df, family = "binomial")
+model_ret2 <- glm(Retained.2 ~ EGR.599 + Sex + India.Citizen + Primary.Academic.Plan + Term.1.Enrolled.Units.Centered,
+                  data = df_reg, family = "binomial")
+model_ret3 <- glm(Retained.3 ~ EGR.599 + Sex + India.Citizen + Primary.Academic.Plan + Term.2.Enrolled.Units.Centered,
+                  data = df_reg, family = "binomial")
+model_ret4 <- glm(Retained.4 ~ EGR.599 + Sex + India.Citizen + Primary.Academic.Plan + Term.3.Enrolled.Units.Centered,
+                  data = df_reg, family = "binomial")
 
 glm_table(model_ret2, "Logistic Regression: Term 2 Retention (Full Model)")
 glm_table(model_ret3, "Logistic Regression: Term 3 Retention (Full Model)")
 glm_table(model_ret4, "Logistic Regression: Term 4 Retention (Full Model)")
 
+# McFadden R2 for the logistic regression
+r2_mcfadden(model_ret2)
+r2_mcfadden(model_ret3)
+r2_mcfadden(model_ret4)
+
+# Tjur R2 for logistic regression
+r2(model_ret2)
+r2(model_ret3)
+r2(model_ret4)
+
 # Reduced models + LRT
-model_ret2_red <- glm(Retained.2 ~ Sex + India.Citizen + Primary.Academic.Plan,
-                      data = df, family = "binomial")
-model_ret3_red <- glm(Retained.3 ~ Sex + India.Citizen + Primary.Academic.Plan,
-                      data = df, family = "binomial")
-model_ret4_red <- glm(Retained.4 ~ Sex + India.Citizen + Primary.Academic.Plan,
-                      data = df, family = "binomial")
+model_ret2_red <- glm(Retained.2 ~ Sex + India.Citizen + Primary.Academic.Plan + Term.1.Enrolled.Units.Centered,
+                      data = df_reg, family = "binomial")
+model_ret3_red <- glm(Retained.3 ~ Sex + India.Citizen + Primary.Academic.Plan + Term.2.Enrolled.Units.Centered,
+                      data = df_reg, family = "binomial")
+model_ret4_red <- glm(Retained.4 ~ Sex + India.Citizen + Primary.Academic.Plan + Term.3.Enrolled.Units.Centered,
+                      data = df_reg, family = "binomial")
 
 lrt_table <- function(anova_res, label) {
   data.frame(
@@ -209,6 +229,70 @@ bind_rows(
   lrt_table(anova(model_ret4_red, model_ret4, test = "Chisq"), "Term 4: Reduced vs Full")
 ) %>%
   fmt_table(caption = "Likelihood Ratio Tests: Effect of Adding EGR 599 to Retention Models")
+
+# Testing the inclusion of interaction models now
+# Starting with term 2 retention
+model_ret2_credits <- glm(Retained.2 ~ EGR.599*Term.1.Enrolled.Units.Centered + India.Citizen + Primary.Academic.Plan + Sex,
+                  data = df_reg, family = "binomial")
+model_ret2_nationality <- glm(Retained.2 ~ EGR.599*India.Citizen + Term.1.Enrolled.Units.Centered + Primary.Academic.Plan + Sex,
+                          data = df_reg, family = "binomial")
+model_ret2_sex <- glm(Retained.2 ~ EGR.599*Sex + India.Citizen + Primary.Academic.Plan + Term.1.Enrolled.Units.Centered,
+                          data = df_reg, family = "binomial")
+model_ret2_major <- glm(Retained.2 ~ EGR.599*Primary.Academic.Plan + India.Citizen + Term.1.Enrolled.Units.Centered + Sex,
+                          data = df_reg, family = "binomial")
+
+glm_table(model_ret2_credits,"Logistic Regression: Term 2 Retention (Enrolled Units Interaction)")
+glm_table(model_ret2_nationality,"Logistic Regression: Term 2 Retention (Nationality Interaction)")
+glm_table(model_ret2_sex, "Logistic Regression: Term 2 Retention (Sex Interaction)")
+glm_table(model_ret2_major, "Logistic Regression: Term 2 Retention (Major Interaction)")
+
+# Term 3 retention with interactions
+model_ret3_credits <- glm(Retained.3 ~ EGR.599*Term.2.Enrolled.Units.Centered + India.Citizen + Primary.Academic.Plan + Sex,
+                          data = df_reg, family = "binomial")
+model_ret3_nationality <- glm(Retained.3 ~ EGR.599*India.Citizen + Term.2.Enrolled.Units.Centered + Primary.Academic.Plan + Sex,
+                              data = df_reg, family = "binomial")
+model_ret3_sex <- glm(Retained.3 ~ EGR.599*Sex + India.Citizen + Primary.Academic.Plan + Term.2.Enrolled.Units.Centered,
+                      data = df_reg, family = "binomial")
+model_ret3_major <- glm(Retained.3 ~ EGR.599*Primary.Academic.Plan + India.Citizen + Term.2.Enrolled.Units.Centered + Sex,
+                        data = df_reg, family = "binomial")
+
+glm_table(model_ret3_credits, "Logistic Regression: Term 3 Retention (Enrolled Units Interaction)")
+glm_table(model_ret3_nationality, "Logistic Regression: Term 3 Retention (Nationality Interaction)")
+glm_table(model_ret3_sex, "Logistic Regression: Term 3 Retention (Sex Interaction)")
+glm_table(model_ret3_major, "Logistic Regression: Term 3 Retention (Major Interaction)")
+
+# Term 4 retention with interactions
+model_ret4_credits <- glm(Retained.4 ~ EGR.599*Term.3.Enrolled.Units.Centered + India.Citizen + Primary.Academic.Plan + Sex,
+                          data = df_reg, family = "binomial")
+model_ret4_nationality <- glm(Retained.4 ~ EGR.599*India.Citizen + Term.3.Enrolled.Units.Centered + Primary.Academic.Plan + Sex,
+                              data = df_reg, family = "binomial")
+model_ret4_sex <- glm(Retained.4 ~ EGR.599*Sex + India.Citizen + Primary.Academic.Plan + Term.3.Enrolled.Units.Centered,
+                      data = df_reg, family = "binomial")
+model_ret4_major <- glm(Retained.4 ~ EGR.599*Primary.Academic.Plan + India.Citizen + Term.3.Enrolled.Units.Centered + Sex,
+                        data = df_reg, family = "binomial")
+
+glm_table(model_ret4_credits,  "Logistic Regression: Term 4 Retention (Enrolled Units Interaction)")
+glm_table(model_ret4_nationality, "Logistic Regression: Term 4 Retention (Nationality Interaction)")
+glm_table(model_ret4_sex, "Logistic Regression: Term 4 Retention (Sex Interaction)")
+glm_table(model_ret4_major, "Logistic Regression: Term 4 Retention (Major Interaction)")
+
+# LRT for interaction models and the full model
+bind_rows(
+  lrt_table(anova(model_ret2, model_ret2_credits, test = "Chisq"), "Term 2: Full vs Enrolled Units Interaction"),
+  lrt_table(anova(model_ret2, model_ret2_nationality, test = "Chisq"), "Term 2: Full vs Nationality Interaction"),
+  lrt_table(anova(model_ret2, model_ret2_sex, test = "Chisq"), "Term 2: Full vs Sex Interaction"),
+  lrt_table(anova(model_ret2, model_ret2_major, test = "Chisq"), "Term 2: Full vs Major Interaction"),
+  lrt_table(anova(model_ret3, model_ret3_credits, test = "Chisq"), "Term 3: Full vs Enrolled Units Interaction"),
+  lrt_table(anova(model_ret3, model_ret3_nationality, test = "Chisq"), "Term 3: Full vs Nationality Interaction"),
+  lrt_table(anova(model_ret3, model_ret3_sex, test = "Chisq"), "Term 3: Full vs Sex Interaction"),
+  lrt_table(anova(model_ret3, model_ret3_major, test = "Chisq"), "Term 3: Full vs Major Interaction"),
+  lrt_table(anova(model_ret4, model_ret4_credits, test = "Chisq"), "Term 4: Full vs Enrolled Units Interaction"),
+  lrt_table(anova(model_ret4, model_ret4_nationality, test = "Chisq"), "Term 4: Full vs Nationality Interaction"),
+  lrt_table(anova(model_ret4, model_ret4_sex, test = "Chisq"), "Term 4: Full vs Sex Interaction"),
+  lrt_table(anova(model_ret4, model_ret4_major, test = "Chisq"), "Term 4: Full vs Major Interaction")
+) %>%
+  fmt_table(caption = "Likelihood Ratio Tests: Effect of Adding Interactions Terms to Retention Models")
+
 
 # Hypothesis Testing: GPA ######################################################
 
@@ -252,9 +336,13 @@ lm_table <- function(model, caption = NULL) {
   ) %>% fmt_table(caption = caption)
 }
 
-Grad_GPA_reg <- lm(Graduation.Cum.GPA ~ EGR.599 + Sex + India.Citizen +
-                     Primary.Academic.Plan, data = df)
+Grad_GPA_reg <- lm(Graduation.Cum.GPA ~ EGR.599 + Sex + India.Citizen + 
+                     Primary.Academic.Plan, data = df_reg)
 lm_table(Grad_GPA_reg, "ANCOVA: Graduation Cumulative GPA")
+
+Term1_GPA_reg <- lm(Term.1.Cum.GPA ~ EGR.599 + Sex + India.Citizen +
+                      Primary.Academic.Plan, data = df_reg)
+lm_table(Term1_GPA_reg, "ANCOVA: Term 1 Cumulative GPA")
 
 # emmeans for ANCOVA adjusted means
 emmeans(Grad_GPA_reg, ~ EGR.599) %>%
@@ -263,18 +351,49 @@ emmeans(Grad_GPA_reg, ~ EGR.599) %>%
   mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
   fmt_table(caption = "Estimated Marginal Means: Graduation GPA by EGR 599 (Adjusted)")
 
-Term1_GPA_reg <- lm(Term.1.Cum.GPA ~ EGR.599 + Sex + India.Citizen +
-                      Primary.Academic.Plan, data = df)
-lm_table(Term1_GPA_reg, "ANCOVA: Term 1 Cumulative GPA")
+emmeans(Term1_GPA_reg, ~ EGR.599) %>%
+  as.data.frame() %>%
+  rename(EGR_599 = EGR.599, Adj_Mean = emmean) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
+  fmt_table(caption = "Estimated Marginal Means: Term 1 GPA by EGR 599 (Adjusted)")
 
-# Interaction models
+
+# Interaction models for graduation GPA
 Grad_GPA_gender_reg      <- lm(Graduation.Cum.GPA ~ EGR.599 * Sex + India.Citizen +
-                                 Primary.Academic.Plan, data = df)
+                                 Primary.Academic.Plan, data = df_reg)
 Grad_GPA_nationality_reg <- lm(Graduation.Cum.GPA ~ EGR.599 * India.Citizen + Sex +
-                                 Primary.Academic.Plan, data = df)
+                                 Primary.Academic.Plan, data = df_reg)
 Grad_GPA_major_reg       <- lm(Graduation.Cum.GPA ~ EGR.599 * Primary.Academic.Plan +
-                                 Sex + India.Citizen, data = df)
+                                 Sex + India.Citizen, data = df_reg)
 
 lm_table(Grad_GPA_gender_reg,      "ANCOVA: Graduation GPA ~ EGR599 × Sex Interaction")
 lm_table(Grad_GPA_nationality_reg, "ANCOVA: Graduation GPA ~ EGR599 × Nationality Interaction")
 lm_table(Grad_GPA_major_reg,       "ANCOVA: Graduation GPA ~ EGR599 × Major Interaction")
+
+# Interaction models for term 1 GPA
+Term1_GPA_gender_reg      <- lm(Term.1.Cum.GPA ~ EGR.599 * Sex + India.Citizen +
+                                 Primary.Academic.Plan, data = df_reg)
+Term1_GPA_nationality_reg <- lm(Term.1.Cum.GPA ~ EGR.599 * India.Citizen + Sex +
+                                 Primary.Academic.Plan, data = df_reg)
+Term1_GPA_major_reg       <- lm(Term.1.Cum.GPA ~ EGR.599 * Primary.Academic.Plan +
+                                 Sex + India.Citizen, data = df_reg)
+
+lm_table(Term1_GPA_gender_reg,      "ANCOVA: Term 1 GPA ~ EGR599 × Sex Interaction")
+lm_table(Term1_GPA_nationality_reg, "ANCOVA: Term 1 GPA ~ EGR599 × Nationality Interaction")
+lm_table(Term1_GPA_major_reg,       "ANCOVA: Term 1 GPA ~ EGR599 × Major Interaction")
+
+# Likelihood ratio tests
+# LRT for interaction models and the full model
+bind_rows(
+  lrt_table(anova(Term1_GPA_reg, Term1_GPA_gender_reg, test = "Chisq"), "Term 1 GPA: Full vs Sex Interaction"),
+  lrt_table(anova(Term1_GPA_reg, Term1_GPA_nationality_reg, test = "Chisq"), "Term 1 GPA: Full vs Nationality Interaction"),
+  lrt_table(anova(Term1_GPA_reg, Term1_GPA_major_reg, test = "Chisq"), "Term 1 GPA: Full vs Major Interaction"),
+  lrt_table(anova(Grad_GPA_reg, Grad_GPA_gender_reg, test = "Chisq"), "Graduation GPA: Full vs Sex Interaction"),
+  lrt_table(anova(Grad_GPA_reg, Grad_GPA_nationality_reg, test = "Chisq"), "Graduation GPA: Full vs Nationality Interaction"),
+  lrt_table(anova(Grad_GPA_reg, Grad_GPA_major_reg, test = "Chisq"), "Graduation GPA: Full vs Major Interaction"),
+) %>%
+  fmt_table(caption = "Likelihood Ratio Tests: Effect of Adding Interactions Terms to Retention Models")
+
+
+
+
